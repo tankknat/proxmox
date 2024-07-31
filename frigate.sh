@@ -5,59 +5,114 @@
 # License: MIT
 # https://github.com/tteck/Proxmox/raw/main/LICENSE
 
-source /dev/stdin <<<"$FUNCTIONS_FILE_PATH"
-color
-verb_ip6
-catch_errors
-setting_up_container
-network_check
-update_os
+# Variables
+LXC_NAME="frigate-nvr"
+LXC_ID=105
+LXC_TEMPLATE="/var/lib/vz/template/cache/debian-11-standard_11.0-1_amd64.tar.gz"
+LXC_CONFIG="/etc/pve/lxc/${LXC_ID}.conf"
 
-msg_info "Installing Dependencies (Patience)"
-$STD apt-get install -y {curl,sudo,mc,git,gpg,automake,build-essential,xz-utils,libtool,ccache,pkg-config,libgtk-3-dev,libavcodec-dev,libavformat-dev,libswscale-dev,libv4l-dev,libxvidcore-dev,libx264-dev,libjpeg-dev,libpng-dev,libtiff-dev,gfortran,openexr,libatlas-base-dev,libssl-dev,libtbb2,libtbb-dev,libdc1394-22-dev,libopenexr-dev,libgstreamer-plugins-base1.0-dev,libgstreamer1.0-dev,gcc,gfortran,libopenblas-dev,liblapack-dev,libusb-1.0-0-dev,jq}
-msg_ok "Installed Dependencies"
+# Functions
+function color {
+  # Define your color functions here
+  # Example:
+  # GREEN='\033[0;32m'
+  # NC='\033[0m' # No Color
+}
 
-msg_info "Installing Python3 Dependencies"
-$STD apt-get install -y {python3,python3-dev,python3-setuptools,python3-distutils,python3-pip}
-msg_ok "Installed Python3 Dependencies"
+function msg_info {
+  echo -e "[INFO] $1"
+}
 
-msg_info "Installing Node.js"
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
-echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" >/etc/apt/sources.list.d/nodesource.list
-$STD apt-get update
-$STD apt-get install -y nodejs
-msg_ok "Installed Node.js"
+function msg_ok {
+  echo -e "[OK] $1"
+}
 
-msg_info "Installing go2rtc"
-mkdir -p /usr/local/go2rtc/bin
-cd /usr/local/go2rtc/bin
-wget -qO go2rtc "https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_amd64"
-chmod +x go2rtc
-$STD ln -svf /usr/local/go2rtc/bin/go2rtc /usr/local/bin/go2rtc
-msg_ok "Installed go2rtc"
+function catch_errors {
+  trap 'echo "Error on line $LINENO"; exit 1;' ERR
+}
 
-msg_info "Setting Up Hardware Acceleration"
-$STD apt-get -y install {va-driver-all,ocl-icd-libopencl1,intel-opencl-icd,vainfo,intel-gpu-tools}
-if [[ "$CTTYPE" == "0" ]]; then
-  chgrp video /dev/dri
-  chmod 755 /dev/dri
-  chmod 660 /dev/dri/*
-fi
-msg_ok "Set Up Hardware Acceleration"
+function update_os {
+  msg_info "Updating OS"
+  apt-get update && apt-get upgrade -y
+  msg_ok "OS Updated"
+}
 
-# Set the desired Frigate version
-RELEASE="0.14.0-rc1-tensorrt"
-msg_info "Installing Frigate $RELEASE (Perseverance)"
-if [ -n "$SPINNER_PID" ] && ps -p $SPINNER_PID > /dev/null; then kill $SPINNER_PID > /dev/null; fi
+function install_dependencies {
+  msg_info "Installing Dependencies (Patience)"
+  apt-get install -y curl sudo mc git gpg automake build-essential xz-utils libtool ccache pkg-config \
+    libgtk-3-dev libavcodec-dev libavformat-dev libswscale-dev libv4l-dev libxvidcore-dev libx264-dev \
+    libjpeg-dev libpng-dev libtiff-dev gfortran openexr libatlas-base-dev libssl-dev libtbb2 libtbb-dev \
+    libdc1394-22-dev libopenexr-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev gcc gfortran \
+    libopenblas-dev liblapack-dev libusb-1.0-0-dev jq
+  msg_ok "Installed Dependencies"
+}
 
-# Pull the specific Docker image for Frigate
-docker pull ghcr.io/blakeblackshear/frigate:$RELEASE
-docker tag ghcr.io/blakeblackshear/frigate:$RELEASE frigate:latest
+function install_python3_dependencies {
+  msg_info "Installing Python3 Dependencies"
+  apt-get install -y python3 python3-dev python3-setuptools python3-distutils python3-pip
+  msg_ok "Installed Python3 Dependencies"
+}
 
-# Set up Frigate configuration
-mkdir -p /config
-cat <<EOF >/config/config.yml
+function install_nodejs {
+  msg_info "Installing Node.js"
+  mkdir -p /etc/apt/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+  apt-get update
+  apt-get install -y nodejs
+  msg_ok "Installed Node.js"
+}
+
+function install_go2rtc {
+  msg_info "Installing go2rtc"
+  mkdir -p /usr/local/go2rtc/bin
+  cd /usr/local/go2rtc/bin
+  wget -qO go2rtc "https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_amd64"
+  chmod +x go2rtc
+  ln -svf /usr/local/go2rtc/bin/go2rtc /usr/local/bin/go2rtc
+  msg_ok "Installed go2rtc"
+}
+
+function setup_hardware_acceleration {
+  msg_info "Setting Up Hardware Acceleration"
+  apt-get -y install va-driver-all ocl-icd-libopencl1 intel-opencl-icd vainfo intel-gpu-tools
+  if [[ "$CTTYPE" == "0" ]]; then
+    chgrp video /dev/dri
+    chmod 755 /dev/dri
+    chmod 660 /dev/dri/*
+  fi
+  msg_ok "Set Up Hardware Acceleration"
+}
+
+function install_frigate {
+  RELEASE=$(curl -s https://api.github.com/repos/blakeblackshear/frigate/releases/latest | jq -r '.tag_name')
+  msg_info "Installing Frigate $RELEASE (Perseverance)"
+  cd ~
+  mkdir -p /opt/frigate/models
+  wget -q https://github.com/blakeblackshear/frigate/archive/refs/tags/${RELEASE}.tar.gz -O frigate.tar.gz
+  tar -xzf frigate.tar.gz -C /opt/frigate --strip-components 1
+  rm -rf frigate.tar.gz
+  cd /opt/frigate
+  pip3 wheel --wheel-dir=/wheels -r /opt/frigate/docker/main/requirements-wheels.txt
+  cp -a /opt/frigate/docker/main/rootfs/. /
+  export TARGETARCH="amd64"
+  echo 'libc6 libraries/restart-without-asking boolean true' | debconf-set-selections
+  wget -q -O /opt/frigate/docker/main/install_deps.sh https://raw.githubusercontent.com/blakeblackshear/frigate/dev/docker/main/install_deps.sh
+  /opt/frigate/docker/main/install_deps.sh
+  ln -svf /usr/lib/btbn-ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
+  ln -svf /usr/lib/btbn-ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
+  pip3 install -U /wheels/*.whl
+  ldconfig
+  pip3 install -r /opt/frigate/docker/main/requirements-dev.txt
+  /opt/frigate/.devcontainer/initialize.sh
+  make version
+  cd /opt/frigate/web
+  npm install
+  npm run build
+  cp -r /opt/frigate/web/dist/* /opt/frigate/web/
+  cp -r /opt/frigate/config/. /config
+  sed -i '/^s6-svc -O \.$/s/^/#/' /opt/frigate/docker/main/rootfs/etc/s6-overlay/s6-rc.d/frigate/run
+  cat <<EOF >/config/config.yml
 mqtt:
   enabled: false
 cameras:
@@ -75,28 +130,29 @@ cameras:
       width: 1920
       fps: 5
 EOF
-ln -sf /config/config.yml /opt/frigate/config/config.yml
-if [[ "$CTTYPE" == "0" ]]; then
-  sed -i -e 's/^kvm:x:104:$/render:x:104:root,frigate/' -e 's/^render:x:105:root$/kvm:x:105:/' /etc/group
-else
-  sed -i -e 's/^kvm:x:104:$/render:x:104:frigate/' -e 's/^render:x:105:$/kvm:x:105:/' /etc/group
-fi
-echo "tmpfs   /tmp/cache      tmpfs   defaults        0       0" >> /etc/fstab
-msg_ok "Installed Frigate $RELEASE"
+  ln -sf /config/config.yml /opt/frigate/config/config.yml
+  if [[ "$CTTYPE" == "0" ]]; then
+    sed -i -e 's/^kvm:x:104:$/render:x:104:root,frigate/' -e 's/^render:x:105:root$/kvm:x:105:/' /etc/group
+  else
+    sed -i -e 's/^kvm:x:104:$/render:x:104:frigate/' -e 's/^render:x:105:$/kvm:x:105:/' /etc/group
+  fi
+  echo "tmpfs   /tmp/cache      tmpfs   defaults        0       0" >> /etc/fstab
+  msg_ok "Installed Frigate $RELEASE"
+}
 
-if grep -q -o -m1 'avx[^ ]*' /proc/cpuinfo; then
-  msg_ok "AVX Support Detected"
-  msg_info "Installing Openvino Object Detection Model (Resilience)"
-  $STD pip install -r /opt/frigate/docker/main/requirements-ov.txt
-  cd /opt/frigate/models
-  export ENABLE_ANALYTICS=NO
-  $STD /usr/local/bin/omz_downloader --name ssdlite_mobilenet_v2 --num_attempts 2
-  $STD /usr/local/bin/omz_converter --name ssdlite_mobilenet_v2 --precision FP16 --mo /usr/local/bin/mo
-  cd /
-  cp -r /opt/frigate/models/public/ssdlite_mobilenet_v2 openvino-model
-  wget -q https://github.com/openvinotoolkit/open_model_zoo/raw/master/data/dataset_classes/coco_91cl_bkgr.txt -O openvino-model/coco_91cl_bkgr.txt
-  sed -i 's/truck/car/g' openvino-model/coco_91cl_bkgr.txt
-  cat <<EOF >>/config/config.yml
+function install_openvino_model {
+  if grep -q -o -m1 'avx[^ ]*' /proc/cpuinfo; then
+    msg_info "Installing Openvino Object Detection Model (Resilience)"
+    pip install -r /opt/frigate/docker/main/requirements-ov.txt
+    cd /opt/frigate/models
+    export ENABLE_ANALYTICS=NO
+    /usr/local/bin/omz_downloader --name ssdlite_mobilenet_v2 --num_attempts 2
+    /usr/local/bin/omz_converter --name ssdlite_mobilenet_v2 --precision FP16 --mo /usr/local/bin/mo
+    cd /
+    cp -r /opt/frigate/models/public/ssdlite_mobilenet_v2 openvino-model
+    wget -q https://github.com/openvinotoolkit/open_model_zoo/raw/master/data/dataset_classes/coco_91cl_bkgr.txt -O openvino-model/coco_91cl_bkgr.txt
+    sed -i 's/truck/car/g' openvino-model/coco_91cl_bkgr.txt
+    cat <<EOF >>/config/config.yml
 detectors:
   ov:
     type: openvino
@@ -110,103 +166,46 @@ model:
   input_pixel_format: bgr
   labelmap_path: /openvino-model/coco_91cl_bkgr.txt
 EOF
-  msg_ok "Installed Openvino Object Detection Model"
-else
-  cat <<EOF >>/config/config.yml
+    msg_ok "Installed Openvino Object Detection Model"
+  else
+    cat <<EOF >>/config/config.yml
 model:
   path: /cpu_model.tflite
 EOF
-fi
+  fi
+}
 
-msg_info "Installing Coral Object Detection Model (Patience)"
-cd /opt/frigate
-export CCACHE_DIR=/root/.ccache
-export CCACHE_MAXSIZE=2G
-wget -q https://github.com/libusb/libusb/archive/v1.0.26.zip
-unzip -q v1.0.26.zip
-rm v1.0.26.zip
-cd libusb-1.0.26
-$STD ./bootstrap.sh
-$STD ./configure --disable-udev --enable-shared
-$STD make -j $(nproc --all)
-cd /opt/frigate/libusb-1.0.26/libusb
-mkdir -p /usr/local/lib
-$STD /bin/bash ../libtool  --mode=install /usr/bin/install -c libusb-1.0.la '/usr/local/lib'
-mkdir -p /usr/local/include/libusb-1.0
-$STD /usr/bin/install -c -m 644 libusb.h '/usr/local/include/libusb-1.0'
-ldconfig
-cd /
-wget -qO edgetpu_model.tflite https://github.com/google-coral/test_data/raw/release-frogfish/ssdlite_mobiledet_coco_qat_postprocess_edgetpu.tflite
-wget -qO cpu_model.tflite https://github.com/google-coral/test_data/raw/release-frogfish/ssdlite_mobiledet_coco_qat_postprocess.tflite
-cp /opt/frigate/labelmap.txt /labelmap.txt
-wget -qO yamnet-tflite-classification-tflite-v1.tar.gz https://www.kaggle.com/api/v1/models/google/yamnet/tfLite/classification-tflite/1/download
-tar xzf yamnet-tflite-classification-tflite-v1.tar.gz
-rm -rf yamnet-tflite-classification-tflite-v1.tar.gz
-mv 1.tflite cpu_audio_model.tflite
-cp /opt/frigate/audio-labelmap.txt /audio-labelmap.txt
-mkdir -p /media/frigate
-wget -qO /media/frigate/person-bicycle-car-detection.mp4 https://github.com/google-coral/test_data/raw/release-frogfish/person_bicycle_car_detection.mp4
-sed -i 's|127.0.0.1:1935|0.0.0.0:1935|g' /opt/frigate/docker/Dockerfile
-msg_ok "Installed Coral Object Detection Model"
+function install_coral_model {
+  msg_info "Installing Coral Object Detection Model (Patience)"
+  cd /opt/frigate
+  export CCACHE_DIR=/root/.ccache
+  export CCACHE_MAXSIZE=2G
+  wget -q https://github.com/libusb/libusb/archive/v1.0.26.zip
+  unzip -q v1.0.26.zip
+  rm v1.0.26.zip
+  cd libusb-1.0.26
+  ./autogen.sh
+  ./configure
+  make -j"$(nproc)"
+  make install
+  cd ..
+  wget -q https://github.com/Coral/edgetpu/archive/refs/tags/v2.14.0.zip
+  unzip -q v2.14.0.zip
+  cd edgetpu-2.14.0
+  python3 setup.py install
+  msg_ok "Installed Coral Object Detection Model"
+}
 
-# Update the Docker Compose file to use the specific Frigate version
-msg_info "Setting up Docker Compose"
-mkdir -p /opt/frigate
-cat <<EOF >/opt/frigate/docker-compose.yml
-version: '3.8'
-services:
-  frigate:
-    image: ghcr.io/blakeblackshear/frigate:$RELEASE
-    container_name: frigate
-    restart: unless-stopped
-    privileged: true
-    shm_size: 256mb
-    devices:
-      - /dev/dri/renderD128
-    volumes:
-      - /config:/config
-      - /media/frigate:/media/frigate
-    ports:
-      - 5000:5000
-      - 1935:1935
-    environment:
-      - FRIGATE_RTSP_PASSWORD=password
-EOF
-msg_ok "Set up Docker Compose"
+# Script Execution
+catch_errors
+update_os
+install_dependencies
+install_python3_dependencies
+install_nodejs
+install_go2rtc
+setup_hardware_acceleration
+install_frigate
+install_openvino_model
+install_coral_model
 
-msg_info "Starting Frigate Container"
-cd /opt/frigate
-$STD docker-compose up -d
-msg_ok "Started Frigate Container"
-
-motd_ssh
-customize
-
-msg_info "Cleaning up"
-$STD apt-get autoremove
-$STD apt-get autoclean
-msg_ok "Cleaned"
-
-msg_info "Creating Service"
-service_path="/etc/systemd/system/frigate.service"
-echo "[Unit]
-Description=Frigate NVR Service
-After=docker.service
-Requires=docker.service
-
-[Service]
-Restart=always
-ExecStart=/usr/local/bin/docker-compose -f /opt/frigate/docker-compose.yml up
-ExecStop=/usr/local/bin/docker-compose -f /opt/frigate/docker-compose.yml down
-TimeoutStartSec=0
-
-[Install]
-WantedBy=multi-user.target" >$service_path
-$STD systemctl enable --now frigate
-msg_ok "Created Service"
-
-msg_info "Starting Frigate"
-$STD systemctl start frigate
-msg_ok "Started Frigate"
-
-msg_ok "Setup Finished. Connect to the Frigate Web UI at http://${CTID}:${CTPORT}/"
+msg_ok "Frigate Installation and Setup Complete"
